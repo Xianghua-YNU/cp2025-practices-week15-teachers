@@ -22,21 +22,15 @@ warnings.filterwarnings('ignore')
 def ode_system_shooting(t, y):
     """
     Define the ODE system for shooting method.
-    
-    Convert the second-order ODE u'' = -π(u+1)/4 into a first-order system:
-    y1 = u, y2 = u'
-    y1' = y2
-    y2' = -π(y1+1)/4
-    
-    Args:
-        t (float): Independent variable (time/position)
-        y (array): State vector [y1, y2] where y1=u, y2=u'
-    
-    Returns:
-        list: Derivatives [y1', y2']
+    Convert u'' = -π(u+1)/4 into first-order system:
+        y1 = u, y2 = u'
+        y1' = y2
+        y2' = -π(y1+1)/4
     """
-    return [y[1], -np.pi*(y[0]+1)/4]
-
+    # 检查输入是否合法，避免 float 被当数组用
+    if isinstance(y, (float, int)):
+        raise TypeError("Expected y to be array-like of length 2, got float")
+    return [y[1], -np.pi * (y[0] + 1) / 4]
 
 def boundary_conditions_scipy(ya, yb):
     """
@@ -73,26 +67,23 @@ def ode_system_scipy(x, y):
 
 def solve_bvp_shooting_method(x_span, boundary_conditions, n_points=100, max_iterations=10, tolerance=1e-6):
     """
-    Solve boundary value problem using shooting method.
+    Solve boundary value problem using shooting method with secant iterations.
     """
-    # Validate input parameters
     if len(x_span) != 2 or x_span[1] <= x_span[0]:
         raise ValueError("x_span must be a tuple (x_start, x_end) with x_end > x_start")
     if len(boundary_conditions) != 2:
         raise ValueError("boundary_conditions must be a tuple (u_left, u_right)")
     if n_points < 10:
         raise ValueError("n_points must be at least 10")
-    
+
     x_start, x_end = x_span
     u_left, u_right = boundary_conditions
     x = np.linspace(x_start, x_end, n_points)
 
     # First guess
     m1 = -1.0
-    y0_1 = [u_left, m1]
+    y0_1 = np.array([u_left, m1], dtype=float)
     sol1 = odeint(ode_system_shooting, y0_1, x)
-    if sol1.ndim != 2 or sol1.shape[1] < 1:
-        raise RuntimeError("ODE integration failed on first guess (sol1)")
     u_end_1 = sol1[-1, 0]
 
     if abs(u_end_1 - u_right) < tolerance:
@@ -100,39 +91,31 @@ def solve_bvp_shooting_method(x_span, boundary_conditions, n_points=100, max_ite
 
     # Second guess
     m2 = m1 * u_right / u_end_1 if abs(u_end_1) > 1e-12 else m1 + 1.0
-    y0_2 = [u_left, m2]
+    y0_2 = np.array([u_left, m2], dtype=float)
     sol2 = odeint(ode_system_shooting, y0_2, x)
-    if sol2.ndim != 2 or sol2.shape[1] < 1:
-        raise RuntimeError("ODE integration failed on second guess (sol2)")
     u_end_2 = sol2[-1, 0]
 
     if abs(u_end_2 - u_right) < tolerance:
         return x, sol2[:, 0]
 
-    # Secant iterations
     for _ in range(max_iterations):
         if abs(u_end_2 - u_end_1) < 1e-12:
             m3 = m2 + 0.1
         else:
             m3 = m2 + (u_right - u_end_2) * (m2 - m1) / (u_end_2 - u_end_1)
-        
-        y0_3 = [u_left, m3]
+
+        y0_3 = np.array([u_left, m3], dtype=float)
         sol3 = odeint(ode_system_shooting, y0_3, x)
-        if sol3.ndim != 2 or sol3.shape[1] < 1:
-            raise RuntimeError("ODE integration failed during iteration (sol3)")
         u_end_3 = sol3[-1, 0]
 
         if abs(u_end_3 - u_right) < tolerance:
             return x, sol3[:, 0]
-        
-        # Update values
+
         m1, m2 = m2, m3
         u_end_1, u_end_2 = u_end_2, u_end_3
 
     print(f"Warning: Shooting method did not converge after {max_iterations} iterations.")
-    print(f"Final boundary error: {abs(u_end_3 - u_right):.2e}")
     return x, sol3[:, 0]
-
 
 
 def solve_bvp_scipy_wrapper(x_span, boundary_conditions, n_points=50):
