@@ -74,22 +74,6 @@ def ode_system_scipy(x, y):
 def solve_bvp_shooting_method(x_span, boundary_conditions, n_points=100, max_iterations=10, tolerance=1e-6):
     """
     Solve boundary value problem using shooting method.
-    
-    Algorithm:
-    1. Guess initial slope m1
-    2. Solve IVP with initial conditions [u(0), m1]
-    3. Check if u(1) matches boundary condition
-    4. If not, adjust slope using secant method and repeat
-    
-    Args:
-        x_span (tuple): Domain (x_start, x_end)
-        boundary_conditions (tuple): (u_left, u_right)
-        n_points (int): Number of discretization points
-        max_iterations (int): Maximum iterations for shooting
-        tolerance (float): Convergence tolerance
-    
-    Returns:
-        tuple: (x_array, y_array) solution arrays
     """
     # Validate input parameters
     if len(x_span) != 2 or x_span[1] <= x_span[0]:
@@ -101,58 +85,54 @@ def solve_bvp_shooting_method(x_span, boundary_conditions, n_points=100, max_ite
     
     x_start, x_end = x_span
     u_left, u_right = boundary_conditions
-    
-    # Setup domain
     x = np.linspace(x_start, x_end, n_points)
-    
-    # Initial guess for slope
-    m1 = -1.0  # First guess
-    y0 = [u_left, m1]  # Initial conditions [u(0), u'(0)]
-    
-    # Solve with first guess
-    sol1 = odeint(ode_system_shooting, y0, x)
-    u_end_1 = sol1[-1, 0]  # u(x_end) with first guess
-    
-    # Check if first guess is good enough
+
+    # First guess
+    m1 = -1.0
+    y0_1 = [u_left, m1]
+    sol1 = odeint(ode_system_shooting, y0_1, x)
+    if sol1.ndim != 2 or sol1.shape[1] < 1:
+        raise RuntimeError("ODE integration failed on first guess (sol1)")
+    u_end_1 = sol1[-1, 0]
+
     if abs(u_end_1 - u_right) < tolerance:
         return x, sol1[:, 0]
-    
-    # Second guess using linear scaling
+
+    # Second guess
     m2 = m1 * u_right / u_end_1 if abs(u_end_1) > 1e-12 else m1 + 1.0
-    y0[1] = m2
-    sol2 = odeint(ode_system_shooting, y0, x)
-    u_end_2 = sol2[-1, 0]  # u(x_end) with second guess
-    
-    # Check if second guess is good enough
+    y0_2 = [u_left, m2]
+    sol2 = odeint(ode_system_shooting, y0_2, x)
+    if sol2.ndim != 2 or sol2.shape[1] < 1:
+        raise RuntimeError("ODE integration failed on second guess (sol2)")
+    u_end_2 = sol2[-1, 0]
+
     if abs(u_end_2 - u_right) < tolerance:
         return x, sol2[:, 0]
-    
-    # Iterative improvement using secant method
-    for iteration in range(max_iterations):
-        # Secant method to find better slope
+
+    # Secant iterations
+    for _ in range(max_iterations):
         if abs(u_end_2 - u_end_1) < 1e-12:
-            # Avoid division by zero
             m3 = m2 + 0.1
         else:
             m3 = m2 + (u_right - u_end_2) * (m2 - m1) / (u_end_2 - u_end_1)
         
-        # Solve with new guess
-        y0[1] = m3
-        sol3 = odeint(ode_system_shooting, y0, x)
+        y0_3 = [u_left, m3]
+        sol3 = odeint(ode_system_shooting, y0_3, x)
+        if sol3.ndim != 2 or sol3.shape[1] < 1:
+            raise RuntimeError("ODE integration failed during iteration (sol3)")
         u_end_3 = sol3[-1, 0]
-        
-        # Check convergence
+
         if abs(u_end_3 - u_right) < tolerance:
             return x, sol3[:, 0]
         
-        # Update for next iteration
+        # Update values
         m1, m2 = m2, m3
         u_end_1, u_end_2 = u_end_2, u_end_3
-    
-    # If not converged, return best solution with warning
+
     print(f"Warning: Shooting method did not converge after {max_iterations} iterations.")
     print(f"Final boundary error: {abs(u_end_3 - u_right):.2e}")
     return x, sol3[:, 0]
+
 
 
 def solve_bvp_scipy_wrapper(x_span, boundary_conditions, n_points=50):
