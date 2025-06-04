@@ -22,15 +22,21 @@ warnings.filterwarnings('ignore')
 def ode_system_shooting(t, y):
     """
     Define the ODE system for shooting method.
-    Convert u'' = -π(u+1)/4 into first-order system:
-        y1 = u, y2 = u'
-        y1' = y2
-        y2' = -π(y1+1)/4
+    
+    Convert the second-order ODE u'' = -π(u+1)/4 into a first-order system:
+    y1 = u, y2 = u'
+    y1' = y2
+    y2' = -π(y1+1)/4
+    
+    Args:
+        t (float): Independent variable (time/position)
+        y (array): State vector [y1, y2] where y1=u, y2=u'
+    
+    Returns:
+        list: Derivatives [y1', y2']
     """
-    # 检查输入是否合法，避免 float 被当数组用
-    if isinstance(y, (float, int)):
-        raise TypeError("Expected y to be array-like of length 2, got float")
-    return [y[1], -np.pi * (y[0] + 1) / 4]
+    return [y[1], -np.pi*(y[0]+1)/4]
+
 
 def boundary_conditions_scipy(ya, yb):
     """
@@ -67,54 +73,85 @@ def ode_system_scipy(x, y):
 
 def solve_bvp_shooting_method(x_span, boundary_conditions, n_points=100, max_iterations=10, tolerance=1e-6):
     """
-    Solve boundary value problem using shooting method with secant iterations.
+    Solve boundary value problem using shooting method.
+    
+    Algorithm:
+    1. Guess initial slope m1
+    2. Solve IVP with initial conditions [u(0), m1]
+    3. Check if u(1) matches boundary condition
+    4. If not, adjust slope using secant method and repeat
+    
+    Args:
+        x_span (tuple): Domain (x_start, x_end)
+        boundary_conditions (tuple): (u_left, u_right)
+        n_points (int): Number of discretization points
+        max_iterations (int): Maximum iterations for shooting
+        tolerance (float): Convergence tolerance
+    
+    Returns:
+        tuple: (x_array, y_array) solution arrays
     """
+    # Validate input parameters
     if len(x_span) != 2 or x_span[1] <= x_span[0]:
         raise ValueError("x_span must be a tuple (x_start, x_end) with x_end > x_start")
     if len(boundary_conditions) != 2:
         raise ValueError("boundary_conditions must be a tuple (u_left, u_right)")
     if n_points < 10:
         raise ValueError("n_points must be at least 10")
-
+    
     x_start, x_end = x_span
     u_left, u_right = boundary_conditions
+    
+    # Setup domain
     x = np.linspace(x_start, x_end, n_points)
-
-    # First guess
-    m1 = -1.0
-    y0_1 = np.array([u_left, m1], dtype=float)
-    sol1 = odeint(ode_system_shooting, y0_1, x)
-    u_end_1 = sol1[-1, 0]
-
+    
+    # Initial guess for slope
+    m1 = -1.0  # First guess
+    y0 = [u_left, m1]  # Initial conditions [u(0), u'(0)]
+    
+    # Solve with first guess
+    sol1 = odeint(ode_system_shooting, y0, x)
+    u_end_1 = sol1[-1, 0]  # u(x_end) with first guess
+    
+    # Check if first guess is good enough
     if abs(u_end_1 - u_right) < tolerance:
         return x, sol1[:, 0]
-
-    # Second guess
+    
+    # Second guess using linear scaling
     m2 = m1 * u_right / u_end_1 if abs(u_end_1) > 1e-12 else m1 + 1.0
-    y0_2 = np.array([u_left, m2], dtype=float)
-    sol2 = odeint(ode_system_shooting, y0_2, x)
-    u_end_2 = sol2[-1, 0]
-
+    y0[1] = m2
+    sol2 = odeint(ode_system_shooting, y0, x)
+    u_end_2 = sol2[-1, 0]  # u(x_end) with second guess
+    
+    # Check if second guess is good enough
     if abs(u_end_2 - u_right) < tolerance:
         return x, sol2[:, 0]
-
-    for _ in range(max_iterations):
+    
+    # Iterative improvement using secant method
+    for iteration in range(max_iterations):
+        # Secant method to find better slope
         if abs(u_end_2 - u_end_1) < 1e-12:
+            # Avoid division by zero
             m3 = m2 + 0.1
         else:
             m3 = m2 + (u_right - u_end_2) * (m2 - m1) / (u_end_2 - u_end_1)
-
-        y0_3 = np.array([u_left, m3], dtype=float)
-        sol3 = odeint(ode_system_shooting, y0_3, x)
+        
+        # Solve with new guess
+        y0[1] = m3
+        sol3 = odeint(ode_system_shooting, y0, x)
         u_end_3 = sol3[-1, 0]
-
+        
+        # Check convergence
         if abs(u_end_3 - u_right) < tolerance:
             return x, sol3[:, 0]
-
+        
+        # Update for next iteration
         m1, m2 = m2, m3
         u_end_1, u_end_2 = u_end_2, u_end_3
-
+    
+    # If not converged, return best solution with warning
     print(f"Warning: Shooting method did not converge after {max_iterations} iterations.")
+    print(f"Final boundary error: {abs(u_end_3 - u_right):.2e}")
     return x, sol3[:, 0]
 
 
